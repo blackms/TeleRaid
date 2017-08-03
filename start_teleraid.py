@@ -12,7 +12,8 @@ from flask import Flask, request
 
 # Custom files and packages
 from config.config import config
-from teleraid.teleraid import TeleRaid
+from teleraid.teleraid import TeleRaid, Session, MessageUpdater
+from telepot import Bot as TelegramBot
 
 
 monkey.patch_all()
@@ -42,14 +43,25 @@ def accept_webhook():
     return "OK"  # request ok
 
 
-log.info("TeleRaid starts.")
+t_client = TelegramBot(config['bot_token'])
+session = Session(name="Shared Session", telegram_client=t_client)
+
+log.info('Starting Bot')
 try:
-    t = Thread(target=TeleRaid, name='TeleRaid', args=(data_queue,))
+    t = Thread(target=TeleRaid, name='TeleRaid', args=(data_queue, session,))
     t.daemon = True
     t.start()
 
+    log.debug('Starting thread: MessageUpdater...')
+    updater = MessageUpdater(session=session)
+    updater.daemon = True
+    updater.start()
+    log.debug('MessageUpdater started...')
+
     server = wsgi.WSGIServer((config['host'], config['port']), app)
     server.serve_forever()
+
+    updater.join()
 except KeyboardInterrupt:
     pass
 log.info("TeleRaid ended.")
