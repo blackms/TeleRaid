@@ -4,73 +4,22 @@
 import logging
 import threading
 from datetime import datetime, timedelta
-from time import sleep
 
-from gevent import spawn
 from telepot.exception import TelegramError
 from telepot.namedtuple import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Custom files and packages
 from config.config import config
 from static.stickers import stickers
-from .utils import telepot_shiny, get_pokemon_name, get_move_name
+from .utils import get_pokemon_name, get_move_name
 
 log = logging.getLogger(__name__)
 
 
-class Session(object):
-    messages = dict()
-    raids = dict()
-    chat_id = str()
-    telegram_client = None
+class TeleRaid(threading.Thread):
+    def __init__(self, queue, session, event):
+        self.stop_event = event
 
-    def __init__(self, name, telegram_client):
-        self.name = name
-        self.telegram_client = telegram_client
-
-
-class MessageUpdater(threading.Thread):
-    def __init__(self, session):
-        super(MessageUpdater, self).__init__()
-        self.session = session
-
-    def update_raids(self):
-        delete_raids = []
-        delete_messages = []
-        for r in self.session.raids:
-            if datetime.utcnow() > datetime.utcfromtimestamp(self.session[r]['end']):
-                delete_raids.append(r)
-                for m in self.session.messages:
-                    if r == self.session.messages[m].get('gym_id', ''):
-                        try:
-                            chat_id = self.session.chat_id
-                            sticker_id = self.session.messages[m]['ids']['sticker_id']
-                            location_id = self.session.messages[m]['ids']['location_id']
-                            message_id = self.session.messages[m]['ids']['message_id']
-                            self.__delete_message(msg_identifier=(chat_id, sticker_id))
-                            self.__delete_message(msg_identifier=(chat_id, location_id))
-                            self.__delete_message(msg_identifier=(chat_id, message_id))
-                        except Exception as e:
-                            log.exception("Exception while updating raids: {}".format(repr(e)))
-                            pass
-                        delete_messages.append(m)
-                        log.info('Deleted outdated message.')
-
-        for r in delete_raids:
-            del self.session.raids[r]
-        for m in delete_messages:
-            del self.session.messages[m]
-        log.info("Raids updated.")
-
-    def __delete_message(self, msg_identifier):
-        try:
-            return self.session.telegram_client.deleteMessage(msg_identifier=msg_identifier)
-        except Exception as e:
-            log.exception("Exception while deleting message: {}".format(repr(e)))
-
-
-class TeleRaid:
-    def __init__(self, queue, session):
         self.__bot_token = config['bot_token']
         self.__chat_id = config['chat_id']
 
@@ -80,20 +29,11 @@ class TeleRaid:
 
         self.__queue = queue
         self.__session = session
+        super(TeleRaid, self).__init__()
 
-        retry_time = 1
-        try:
-            spawn(self.__run())
-            retry_time = 1
-        except Exception as e:
-            log.exception("Exception during runtime spawn: {}".format(repr(e)))
-            retry_time *= 2
-            sleep(retry_time)
-            pass
-
-    def __run(self):
+    def run(self):
         log.info("TeleRaid is running...")
-        while True:
+        while self.stop_event:
             try:
                 data_json = self.__queue.get(block=True)
                 for elem in data_json:
@@ -102,8 +42,7 @@ class TeleRaid:
                 for raid in raids_to_notify:
                     self.__notify(raid)
             except Exception as e:
-                log.exception("Exception during regular runtime: {}"
-                              .format(repr(e)))
+                log.exception("Exception during regular runtime: {}".format(repr(e)))
                 pass
 
             self.__queue.task_done()
@@ -121,10 +60,11 @@ class TeleRaid:
 
     def __check_raids(self):
         raids_to_notify = []
-        log.info('Start Processing raids')
         for r in self.__session.raids:
-            log.info('Raid Level: {}'.format(self.__session.raids[r]['level']))
-            log.info(self.__notify_levels)
+            log.debug('Raid Level: {}, I am configured to notify Raid of level: {}'.format(
+                self.__session.raids[r]['level'],
+                self.__notify_levels
+            ))
             if self.__session.raids[r]['level'] not in self.__notify_levels:
                 continue
 
@@ -199,92 +139,6 @@ class TeleRaid:
                           .format(repr(e)))
             pass
 
-    def __update_messages(self):
-        offset = None
-        retry_time = 1
-        while True:
-            try:
-                updates = self.__session.telegram_client.getUpdates(offset=offset)
-                updated_messages = []
-                for u in updates:
-                    callback_query = u.get('callback_query', {})
-                    data = callback_query.get('data', None)
-                    message = callback_query.get('message', {})
-                    message_id = message.get('message_id', 0)
-                    if message_id:
-                        updated_messages.append(message_id)
-                        if message_id not in self.__session.messages:
-                            self.__session.messages[message_id] = {
-                                'gym_id': '',
-                                'text': message['text'],
-                                'entities': message['entities'],
-                                'poll': {
-                                    'yes': 0,
-                                    'no': 0,
-                                    'users': {}
-                                }
-                            }
-
-                        self.__session.messages[message_id]['poll']['users'].update({
-                            callback_query['from']['id']: {
-                                'id': callback_query['from']['id'],
-                                'data': data,
-                                'username': callback_query['from']['first_name']
-                            }
-                        })
-
-                    update_id = u.get('update_id', None)
-                    if update_id and update_id >= offset:
-                        offset = update_id + 1
-
-                for message_id in updated_messages:
-                    poll = self.__session.messages[message_id]['poll']
-                    poll['yes'] = 0
-                    poll['no'] = 0
-
-                    for user in poll['users']:
-                        if poll['users'][user]['data'] == 'y':
-                            poll['yes'] += 1
-                        elif poll['users'][user]['data'] == 'n':
-                            poll['no'] += 1
-
-                    if poll['yes'] or poll['no']:
-                        text = self.__session.messages[message_id]['text']
-                        if 'entities' in self.__session.messages[message_id]:
-                            text = telepot_shiny(self.__session.messages[message_id])
-
-                        yes_string = ('<b>Yes</b>\n' + '\n'.join(
-                            [poll['users'][user]['username']
-                             for user in poll['users']
-                             if poll['users'][user]['data'] == 'y']))
-                        no_string = ('<b>No</b>\n' + '\n'.join(
-                            [poll['users'][user]['username']
-                             for user in poll['users']
-                             if poll['users'][user]['data'] == 'n']))
-                        text = (text.split('\n\n<b>Yes</b>')[0] + ('''\n{}\n{}\n'''.format(yes_string, no_string)))
-                        inline_keyboard = [[
-                            InlineKeyboardButton(
-                                text=("\xF0\x9F\x91\x8D Yes ({})".format(poll['yes'])),
-                                callback_data='y'),
-                            InlineKeyboardButton(
-                                text=("\xF0\x9F\x91\x8E No ({})".format(poll['no'])),
-                                callback_data='n')
-                        ]]
-                        keyboard_markup = InlineKeyboardMarkup(
-                            inline_keyboard=inline_keyboard)
-                        message = self.__edit_message(
-                            msg_identifier=(self.__chat_id, message_id),
-                            text=text,
-                            parse_mode='HTML',
-                            reply_markup=keyboard_markup
-                        )
-                retry_time = 1
-            except Exception as e:
-                log.exception("Exception while updating messages: {}".format(repr(e)))
-                retry_time *= 2
-            finally:
-                sleep(retry_time)
-
     def __send_message(self, text, chat_id, parse_mode=None, reply_markup=None):
         log.info('send message to: {}'.format(chat_id))
         try:
@@ -308,20 +162,6 @@ class TeleRaid:
             return self.__session.telegram_client.sendSticker(chat_id=chat_id, sticker=sticker)
         except Exception as e:
             log.exception("Exception while sending sticker: {}"
-                          .format(repr(e)))
-
-    def __edit_message(self, msg_identifier, text, parse_mode=None, reply_markup=None):
-        try:
-            return self.__session.telegram_client.editMessageText(
-                msg_identifier=msg_identifier,
-                text=text,
-                parse_mode=parse_mode,
-                reply_markup=reply_markup
-            )
-        except TelegramError:
-            log.warning("TelegramError - No change in message after updating.")
-        except Exception as e:
-            log.exception("Exception while editing message: {}"
                           .format(repr(e)))
 
     def __edit_message_reply_markup(self, msg_identifier, reply_markup):
