@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 
 
 class TeleRaid(threading.Thread):
-    def __init__(self, queue, session, event):
+    def __init__(self, queue, session, event, name='TeleRaid'):
         self.stop_event = event
 
         self.__bot_token = config['bot_token']
@@ -30,6 +30,7 @@ class TeleRaid(threading.Thread):
         self.__queue = queue
         self.__session = session
         super(TeleRaid, self).__init__()
+        self.name = name
 
     def run(self):
         log.info("TeleRaid is running...")

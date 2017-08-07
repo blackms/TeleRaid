@@ -44,6 +44,7 @@ def accept_webhook():
 
 t_client = TelegramBot(config['bot_token'])
 session = Session(name="Shared Session", telegram_client=t_client)
+session.chat_id = config['chat_id']
 t1_stopEvent = Event()
 t2_stopEvent = Event()
 t3_stopEvent = Event()

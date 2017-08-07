@@ -114,7 +114,7 @@ class MessageUpdater(threading.Thread):
                 parse_mode=parse_mode,
                 reply_markup=reply_markup
             )
-        except TelegramError:
+        except TelegramError as e:
             self.logger.warning("TelegramError - No change in message after updating.")
         except Exception as e:
             self.logger.exception("Exception while editing message: {}".format(repr(e)))

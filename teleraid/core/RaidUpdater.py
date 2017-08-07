@@ -17,7 +17,7 @@ class RaidUpdater(threading.Thread):
         delete_messages = []
         self.logger.debug('Entering update_raids method.')
         for r in self.session.raids:
-            if datetime.utcnow() > datetime.utcfromtimestamp(self.session[r]['end']):
+            if datetime.utcnow() > datetime.utcfromtimestamp(self.session.raids[r]['end']):
                 delete_raids.append(r)
                 for m in self.session.messages:
                     if r == self.session.messages[m].get('gym_id', ''):
