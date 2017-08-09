@@ -1,5 +1,4 @@
-from RaidUpdater import RaidUpdater
+from Updaters import *
 from Session import Session
-from MessageUpdater import MessageUpdater
 
 __all__ = ['RaidUpdater', 'Session', 'MessageUpdater']

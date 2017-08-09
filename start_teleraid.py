@@ -11,7 +11,7 @@ from flask import Flask, request
 
 # Custom files and packages
 from config.config import config
-from teleraid.teleraid import TeleRaid
+from teleraid.Teleraid import TeleRaid
 from telepot import Bot as TelegramBot
 from teleraid.core import RaidUpdater, Session, MessageUpdater
 
@@ -44,7 +44,6 @@ def accept_webhook():
 
 t_client = TelegramBot(config['bot_token'])
 session = Session(name="Shared Session", telegram_client=t_client)
-session.chat_id = config['chat_id']
 t1_stopEvent = Event()
 t2_stopEvent = Event()
 t3_stopEvent = Event()
